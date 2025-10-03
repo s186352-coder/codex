@@ -58,7 +58,8 @@ pub struct StoredOAuthTokens {
     pub token_response: WrappedOAuthTokenResponse,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum OAuthCredentialsStore {
     Auto,
     File,
@@ -193,15 +194,28 @@ fn load_oauth_tokens_from_keyring<C: CredentialStore>(
     }
 }
 
-pub fn save_oauth_tokens(server_name: &str, tokens: &StoredOAuthTokens) -> Result<()> {
-    let store = KeyringCredentialStore;
-    save_oauth_tokens_with_store(&store, server_name, tokens)
+pub fn save_oauth_tokens(
+    server_name: &str,
+    tokens: &StoredOAuthTokens,
+    store: OAuthCredentialsStore,
+) -> Result<()> {
+    let keyring_store = KeyringCredentialStore;
+    match store {
+        OAuthCredentialsStore::Auto => {
+            save_oauth_tokens_with_store(&keyring_store, server_name, tokens, true)
+        }
+        OAuthCredentialsStore::File => save_oauth_tokens_to_file(tokens),
+        OAuthCredentialsStore::Keyring => {
+            save_oauth_tokens_with_store(&keyring_store, server_name, tokens, false)
+        }
+    }
 }
 
 fn save_oauth_tokens_with_store<C: CredentialStore>(
     store: &C,
     server_name: &str,
     tokens: &StoredOAuthTokens,
+    fallback_to_file: bool,
 ) -> Result<()> {
     let serialized = serde_json::to_string(tokens).context("failed to serialize OAuth tokens")?;
 
@@ -216,15 +230,34 @@ fn save_oauth_tokens_with_store<C: CredentialStore>(
         Err(error) => {
             let message = error.message();
             warn!("failed to write OAuth tokens to keyring: {message}");
-            save_oauth_tokens_to_file(tokens)
-                .with_context(|| format!("failed to write OAuth tokens to keyring: {message}"))
+            if fallback_to_file {
+                save_oauth_tokens_to_file(tokens)
+                    .with_context(|| format!("failed to write OAuth tokens to keyring: {message}"))
+            } else {
+                let err = error.into_error();
+                Err(err.context(format!(
+                    "failed to write OAuth tokens to keyring: {message}"
+                )))
+            }
         }
     }
 }
 
-pub fn delete_oauth_tokens(server_name: &str, url: &str) -> Result<bool> {
-    let store = KeyringCredentialStore;
-    delete_oauth_tokens_with_store(&store, server_name, url)
+pub fn delete_oauth_tokens(
+    server_name: &str,
+    url: &str,
+    store: OAuthCredentialsStore,
+) -> Result<bool> {
+    match store {
+        OAuthCredentialsStore::Auto | OAuthCredentialsStore::Keyring => {
+            let keyring_store = KeyringCredentialStore;
+            delete_oauth_tokens_with_store(&keyring_store, server_name, url)
+        }
+        OAuthCredentialsStore::File => {
+            let key = compute_store_key(server_name, url)?;
+            delete_oauth_tokens_from_file(&key)
+        }
+    }
 }
 
 fn delete_oauth_tokens_with_store<C: CredentialStore>(
@@ -255,6 +288,7 @@ struct OAuthPersistorInner {
     server_name: String,
     url: String,
     authorization_manager: Arc<Mutex<AuthorizationManager>>,
+    credentials_store: OAuthCredentialsStore,
     last_credentials: Mutex<Option<StoredOAuthTokens>>,
 }
 
@@ -263,6 +297,7 @@ impl OAuthPersistor {
         server_name: String,
         url: String,
         manager: Arc<Mutex<AuthorizationManager>>,
+        credentials_store: OAuthCredentialsStore,
         initial_credentials: Option<StoredOAuthTokens>,
     ) -> Self {
         Self {
@@ -270,6 +305,7 @@ impl OAuthPersistor {
                 server_name,
                 url,
                 authorization_manager: manager,
+                credentials_store,
                 last_credentials: Mutex::new(initial_credentials),
             }),
         }
@@ -294,15 +330,22 @@ impl OAuthPersistor {
                 };
                 let mut last_credentials = self.inner.last_credentials.lock().await;
                 if last_credentials.as_ref() != Some(&stored) {
-                    save_oauth_tokens(&self.inner.server_name, &stored)?;
+                    save_oauth_tokens(
+                        &self.inner.server_name,
+                        &stored,
+                        self.inner.credentials_store,
+                    )?;
                     *last_credentials = Some(stored);
                 }
             }
             None => {
                 let mut last_serialized = self.inner.last_credentials.lock().await;
                 if last_serialized.take().is_some()
-                    && let Err(error) =
-                        delete_oauth_tokens(&self.inner.server_name, &self.inner.url)
+                    && let Err(error) = delete_oauth_tokens(
+                        &self.inner.server_name,
+                        &self.inner.url,
+                        self.inner.credentials_store,
+                    )
                 {
                     warn!(
                         "failed to remove OAuth tokens for server {}: {error}",
@@ -735,7 +778,7 @@ mod tests {
 
         super::save_oauth_tokens_to_file(&tokens)?;
 
-        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens)?;
+        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens, true)?;
 
         let fallback_path = super::fallback_file_path()?;
         assert!(!fallback_path.exists(), "fallback file should be removed");
@@ -752,7 +795,7 @@ mod tests {
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
         store.set_error(&key, KeyringError::Invalid("error".into(), "save".into()));
 
-        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens)?;
+        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens, true)?;
 
         let fallback_path = super::fallback_file_path()?;
         assert!(fallback_path.exists(), "fallback file should be created");

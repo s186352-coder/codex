@@ -120,9 +120,9 @@ impl RmcpClient {
         server_name: &str,
         url: &str,
         bearer_token: Option<String>,
+        credentials_store: OAuthCredentialsStore,
     ) -> Result<Self> {
-        let initial_tokens = match load_oauth_tokens(server_name, url, OAuthCredentialsStore::Auto)
-        {
+        let initial_tokens = match load_oauth_tokens(server_name, url, credentials_store) {
             Ok(tokens) => tokens,
             Err(err) => {
                 warn!("failed to read tokens for server `{server_name}`: {err}");
@@ -130,8 +130,13 @@ impl RmcpClient {
             }
         };
         let transport = if let Some(initial_tokens) = initial_tokens.clone() {
-            let (transport, oauth_persistor) =
-                create_oauth_transport_and_runtime(server_name, url, initial_tokens).await?;
+            let (transport, oauth_persistor) = create_oauth_transport_and_runtime(
+                server_name,
+                url,
+                initial_tokens,
+                credentials_store,
+            )
+            .await?;
             PendingTransport::StreamableHttpWithOAuth {
                 transport,
                 oauth_persistor,
@@ -285,6 +290,7 @@ async fn create_oauth_transport_and_runtime(
     server_name: &str,
     url: &str,
     initial_tokens: StoredOAuthTokens,
+    credentials_store: OAuthCredentialsStore,
 ) -> Result<(
     StreamableHttpClientTransport<AuthClient<reqwest::Client>>,
     OAuthPersistor,
@@ -319,6 +325,7 @@ async fn create_oauth_transport_and_runtime(
         server_name.to_string(),
         url.to_string(),
         auth_manager,
+        credentials_store,
         Some(initial_tokens),
     );
 
