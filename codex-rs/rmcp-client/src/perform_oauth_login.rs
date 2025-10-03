@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 use urlencoding::decode;
 
-use crate::OAuthCredentialsStore;
+use crate::OAuthCredentialsStoreMode;
 use crate::StoredOAuthTokens;
 use crate::WrappedOAuthTokenResponse;
 use crate::save_oauth_tokens;
@@ -30,7 +30,7 @@ impl Drop for CallbackServerGuard {
 pub async fn perform_oauth_login(
     server_name: &str,
     server_url: &str,
-    store: OAuthCredentialsStore,
+    store: OAuthCredentialsStoreMode,
 ) -> Result<()> {
     let server = Arc::new(Server::http("127.0.0.1:0").map_err(|err| anyhow!(err))?);
     let guard = CallbackServerGuard {

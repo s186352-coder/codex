@@ -35,7 +35,7 @@ use tracing::warn;
 
 use crate::load_oauth_tokens;
 use crate::logging_client_handler::LoggingClientHandler;
-use crate::oauth::OAuthCredentialsStore;
+use crate::oauth::OAuthCredentialsStoreMode;
 use crate::oauth::OAuthPersistor;
 use crate::oauth::StoredOAuthTokens;
 use crate::utils::convert_call_tool_result;
@@ -120,7 +120,7 @@ impl RmcpClient {
         server_name: &str,
         url: &str,
         bearer_token: Option<String>,
-        credentials_store: OAuthCredentialsStore,
+        credentials_store: OAuthCredentialsStoreMode,
     ) -> Result<Self> {
         let initial_tokens = match load_oauth_tokens(server_name, url, credentials_store) {
             Ok(tokens) => tokens,
@@ -290,7 +290,7 @@ async fn create_oauth_transport_and_runtime(
     server_name: &str,
     url: &str,
     initial_tokens: StoredOAuthTokens,
-    credentials_store: OAuthCredentialsStore,
+    credentials_store: OAuthCredentialsStoreMode,
 ) -> Result<(
     StreamableHttpClientTransport<AuthClient<reqwest::Client>>,
     OAuthPersistor,

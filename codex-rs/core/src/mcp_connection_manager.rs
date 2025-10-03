@@ -16,7 +16,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use codex_mcp_client::McpClient;
-use codex_rmcp_client::OAuthCredentialsStore;
+use codex_rmcp_client::OAuthCredentialsStoreMode;
 use codex_rmcp_client::RmcpClient;
 use mcp_types::ClientCapabilities;
 use mcp_types::Implementation;
@@ -126,7 +126,7 @@ impl McpClientAdapter {
         bearer_token: Option<String>,
         params: mcp_types::InitializeRequestParams,
         startup_timeout: Duration,
-        credentials_store: OAuthCredentialsStore,
+        credentials_store: OAuthCredentialsStoreMode,
     ) -> Result<Self> {
         let client = Arc::new(
             RmcpClient::new_streamable_http_client(
@@ -190,7 +190,7 @@ impl McpConnectionManager {
     pub async fn new(
         mcp_servers: HashMap<String, McpServerConfig>,
         use_rmcp_client: bool,
-        credentials_store: OAuthCredentialsStore,
+        credentials_store: OAuthCredentialsStoreMode,
     ) -> Result<(Self, ClientStartErrors)> {
         // Early exit if no servers are configured.
         if mcp_servers.is_empty() {

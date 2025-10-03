@@ -33,7 +33,7 @@ use codex_protocol::config_types::ReasoningEffort;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::Verbosity;
-use codex_rmcp_client::OAuthCredentialsStore;
+use codex_rmcp_client::OAuthCredentialsStoreMode;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -143,8 +143,12 @@ pub struct Config {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     pub mcp_servers: HashMap<String, McpServerConfig>,
 
-    /// Preferred backend for storing MCP OAuth credentials.
-    pub mcp_oauth_credentials_store: OAuthCredentialsStore,
+    /// Preferred store for MCP OAuth credentials.
+    /// keyring: Use an OS-specific keyring service.
+    ///          https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth.rs#L2
+    /// file: Use a file in the Codex home directory.
+    /// auto (default): Use the OS-specific keyring service if available, otherwise use a file.
+    pub mcp_oauth_credentials_store_mode: OAuthCredentialsStoreMode,
 
     /// Combined provider map (defaults merged with user-defined overrides).
     pub model_providers: HashMap<String, ModelProviderInfo>,
@@ -699,7 +703,11 @@ pub struct ConfigToml {
     pub mcp_servers: HashMap<String, McpServerConfig>,
 
     /// Preferred backend for storing MCP OAuth credentials.
-    pub mcp_oauth_credentials_store: Option<OAuthCredentialsStore>,
+    /// keyring: Use an OS-specific keyring service.
+    ///          https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth.rs#L2
+    /// file: Use a file in the Codex home directory.
+    /// auto (default): Use the OS-specific keyring service if available, otherwise use a file.
+    pub mcp_oauth_credentials_store: Option<OAuthCredentialsStoreMode>,
 
     /// User-defined provider entries that extend/override the built-in list.
     #[serde(default)]
@@ -1081,7 +1089,9 @@ impl Config {
             user_instructions,
             base_instructions,
             mcp_servers: cfg.mcp_servers,
-            mcp_oauth_credentials_store: cfg.mcp_oauth_credentials_store.unwrap_or_default(),
+            // The config.toml omits "_mode" because it's a config file. However, "_mode"
+            // is important in code to differentiate the mode from the store implementation.
+            mcp_oauth_credentials_store_mode: cfg.mcp_oauth_credentials_store.unwrap_or_default(),
             model_providers,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             project_doc_fallback_filenames: cfg
@@ -1904,7 +1914,7 @@ model_verbosity = "high"
                 notify: None,
                 cwd: fixture.cwd(),
                 mcp_servers: HashMap::new(),
-                mcp_oauth_credentials_store: Default::default(),
+                mcp_oauth_credentials_store_mode: Default::default(),
                 model_providers: fixture.model_provider_map.clone(),
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 project_doc_fallback_filenames: Vec::new(),
@@ -1967,7 +1977,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
-            mcp_oauth_credentials_store: Default::default(),
+            mcp_oauth_credentials_store_mode: Default::default(),
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
@@ -2045,7 +2055,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
-            mcp_oauth_credentials_store: Default::default(),
+            mcp_oauth_credentials_store_mode: Default::default(),
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
@@ -2109,7 +2119,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
-            mcp_oauth_credentials_store: Default::default(),
+            mcp_oauth_credentials_store_mode: Default::default(),
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),

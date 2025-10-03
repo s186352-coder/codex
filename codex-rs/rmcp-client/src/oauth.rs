@@ -58,15 +58,19 @@ pub struct StoredOAuthTokens {
     pub token_response: WrappedOAuthTokenResponse,
 }
 
+/// Determine where Codex should store and read MCP credentials.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum OAuthCredentialsStore {
+pub enum OAuthCredentialsStoreMode {
+    /// Keyring when available, otherwise file.
     Auto,
+    /// File in the Codex home directory.
     File,
+    /// Keyring when available, otherwise fail.
     Keyring,
 }
 
-impl Default for OAuthCredentialsStore {
+impl Default for OAuthCredentialsStoreMode {
     fn default() -> Self {
         Self::Auto
     }
@@ -146,15 +150,15 @@ impl PartialEq for WrappedOAuthTokenResponse {
 pub(crate) fn load_oauth_tokens(
     server_name: &str,
     url: &str,
-    store: OAuthCredentialsStore,
+    store: OAuthCredentialsStoreMode,
 ) -> Result<Option<StoredOAuthTokens>> {
     let keyring_store = KeyringCredentialStore;
     match store {
-        OAuthCredentialsStore::Auto => {
+        OAuthCredentialsStoreMode::Auto => {
             load_oauth_tokens_from_keyring_with_fallback_to_file(&keyring_store, server_name, url)
         }
-        OAuthCredentialsStore::File => load_oauth_tokens_from_file(server_name, url),
-        OAuthCredentialsStore::Keyring => {
+        OAuthCredentialsStoreMode::File => load_oauth_tokens_from_file(server_name, url),
+        OAuthCredentialsStoreMode::Keyring => {
             load_oauth_tokens_from_keyring(&keyring_store, server_name, url)
                 .with_context(|| "failed to read OAuth tokens from keyring".to_string())
         }
@@ -197,15 +201,15 @@ fn load_oauth_tokens_from_keyring<C: CredentialStore>(
 pub fn save_oauth_tokens(
     server_name: &str,
     tokens: &StoredOAuthTokens,
-    store: OAuthCredentialsStore,
+    store: OAuthCredentialsStoreMode,
 ) -> Result<()> {
     let keyring_store = KeyringCredentialStore;
     match store {
-        OAuthCredentialsStore::Auto => {
+        OAuthCredentialsStoreMode::Auto => {
             save_oauth_tokens_with_store(&keyring_store, server_name, tokens, true)
         }
-        OAuthCredentialsStore::File => save_oauth_tokens_to_file(tokens),
-        OAuthCredentialsStore::Keyring => {
+        OAuthCredentialsStoreMode::File => save_oauth_tokens_to_file(tokens),
+        OAuthCredentialsStoreMode::Keyring => {
             save_oauth_tokens_with_store(&keyring_store, server_name, tokens, false)
         }
     }
@@ -246,14 +250,14 @@ fn save_oauth_tokens_with_store<C: CredentialStore>(
 pub fn delete_oauth_tokens(
     server_name: &str,
     url: &str,
-    store: OAuthCredentialsStore,
+    store: OAuthCredentialsStoreMode,
 ) -> Result<bool> {
     match store {
-        OAuthCredentialsStore::Auto | OAuthCredentialsStore::Keyring => {
+        OAuthCredentialsStoreMode::Auto | OAuthCredentialsStoreMode::Keyring => {
             let keyring_store = KeyringCredentialStore;
             delete_oauth_tokens_with_store(&keyring_store, server_name, url)
         }
-        OAuthCredentialsStore::File => {
+        OAuthCredentialsStoreMode::File => {
             let key = compute_store_key(server_name, url)?;
             delete_oauth_tokens_from_file(&key)
         }
@@ -288,7 +292,7 @@ struct OAuthPersistorInner {
     server_name: String,
     url: String,
     authorization_manager: Arc<Mutex<AuthorizationManager>>,
-    credentials_store: OAuthCredentialsStore,
+    credentials_store: OAuthCredentialsStoreMode,
     last_credentials: Mutex<Option<StoredOAuthTokens>>,
 }
 
@@ -297,7 +301,7 @@ impl OAuthPersistor {
         server_name: String,
         url: String,
         manager: Arc<Mutex<AuthorizationManager>>,
-        credentials_store: OAuthCredentialsStore,
+        credentials_store: OAuthCredentialsStoreMode,
         initial_credentials: Option<StoredOAuthTokens>,
     ) -> Self {
         Self {
