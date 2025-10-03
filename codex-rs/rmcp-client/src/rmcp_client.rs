@@ -35,6 +35,7 @@ use tracing::warn;
 
 use crate::load_oauth_tokens;
 use crate::logging_client_handler::LoggingClientHandler;
+use crate::oauth::OAuthCredentialsStore;
 use crate::oauth::OAuthPersistor;
 use crate::oauth::StoredOAuthTokens;
 use crate::utils::convert_call_tool_result;
@@ -120,7 +121,8 @@ impl RmcpClient {
         url: &str,
         bearer_token: Option<String>,
     ) -> Result<Self> {
-        let initial_tokens = match load_oauth_tokens(server_name, url) {
+        let initial_tokens = match load_oauth_tokens(server_name, url, OAuthCredentialsStore::Auto)
+        {
             Ok(tokens) => tokens,
             Err(err) => {
                 warn!("failed to read tokens for server `{server_name}`: {err}");

@@ -58,6 +58,19 @@ pub struct StoredOAuthTokens {
     pub token_response: WrappedOAuthTokenResponse,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum OAuthCredentialsStore {
+    Auto,
+    File,
+    Keyring,
+}
+
+impl Default for OAuthCredentialsStore {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 #[derive(Debug)]
 struct CredentialStoreError(anyhow::Error);
 
@@ -129,12 +142,41 @@ impl PartialEq for WrappedOAuthTokenResponse {
     }
 }
 
-pub(crate) fn load_oauth_tokens(server_name: &str, url: &str) -> Result<Option<StoredOAuthTokens>> {
-    let store = KeyringCredentialStore;
-    load_oauth_tokens_with_store(&store, server_name, url)
+pub(crate) fn load_oauth_tokens(
+    server_name: &str,
+    url: &str,
+    store: OAuthCredentialsStore,
+) -> Result<Option<StoredOAuthTokens>> {
+    let keyring_store = KeyringCredentialStore;
+    match store {
+        OAuthCredentialsStore::Auto => {
+            load_oauth_tokens_from_keyring_with_fallback_to_file(&keyring_store, server_name, url)
+        }
+        OAuthCredentialsStore::File => load_oauth_tokens_from_file(server_name, url),
+        OAuthCredentialsStore::Keyring => {
+            load_oauth_tokens_from_keyring(&keyring_store, server_name, url)
+                .with_context(|| "failed to read OAuth tokens from keyring".to_string())
+        }
+    }
 }
 
-fn load_oauth_tokens_with_store<C: CredentialStore>(
+fn load_oauth_tokens_from_keyring_with_fallback_to_file<C: CredentialStore>(
+    store: &C,
+    server_name: &str,
+    url: &str,
+) -> Result<Option<StoredOAuthTokens>> {
+    match load_oauth_tokens_from_keyring(store, server_name, url) {
+        Ok(Some(tokens)) => Ok(Some(tokens)),
+        Ok(None) => load_oauth_tokens_from_file(server_name, url),
+        Err(error) => {
+            warn!("failed to read OAuth tokens from keyring: {error}");
+            load_oauth_tokens_from_file(server_name, url)
+                .with_context(|| format!("failed to read OAuth tokens from keyring: {error}"))
+        }
+    }
+}
+
+fn load_oauth_tokens_from_keyring<C: CredentialStore>(
     store: &C,
     server_name: &str,
     url: &str,
@@ -146,13 +188,8 @@ fn load_oauth_tokens_with_store<C: CredentialStore>(
                 .context("failed to deserialize OAuth tokens from keyring")?;
             Ok(Some(tokens))
         }
-        Ok(None) => load_oauth_tokens_from_file(server_name, url),
-        Err(error) => {
-            let message = error.message();
-            warn!("failed to read OAuth tokens from keyring: {message}");
-            load_oauth_tokens_from_file(server_name, url)
-                .with_context(|| format!("failed to read OAuth tokens from keyring: {message}"))
-        }
+        Ok(None) => Ok(None),
+        Err(error) => Err(error.into_error()),
     }
 }
 
@@ -643,7 +680,8 @@ mod tests {
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
         store.save(KEYRING_SERVICE, &key, &serialized)?;
 
-        let loaded = super::load_oauth_tokens_with_store(&store, &tokens.server_name, &tokens.url)?;
+        let loaded =
+            super::load_oauth_tokens_from_keyring(&store, &tokens.server_name, &tokens.url)?;
         assert_eq!(loaded, Some(expected));
         Ok(())
     }
@@ -657,8 +695,12 @@ mod tests {
 
         super::save_oauth_tokens_to_file(&tokens)?;
 
-        let loaded = super::load_oauth_tokens_with_store(&store, &tokens.server_name, &tokens.url)?
-            .expect("tokens should load from fallback");
+        let loaded = super::load_oauth_tokens_from_keyring_with_fallback_to_file(
+            &store,
+            &tokens.server_name,
+            &tokens.url,
+        )?
+        .expect("tokens should load from fallback");
         assert_tokens_match_without_expiry(&loaded, &expected);
         Ok(())
     }
@@ -674,8 +716,12 @@ mod tests {
 
         super::save_oauth_tokens_to_file(&tokens)?;
 
-        let loaded = super::load_oauth_tokens_with_store(&store, &tokens.server_name, &tokens.url)?
-            .expect("tokens should load from fallback");
+        let loaded = super::load_oauth_tokens_from_keyring_with_fallback_to_file(
+            &store,
+            &tokens.server_name,
+            &tokens.url,
+        )?
+        .expect("tokens should load from fallback");
         assert_tokens_match_without_expiry(&loaded, &expected);
         Ok(())
     }
