@@ -127,7 +127,8 @@ async fn list_dir_slice(
         ));
     }
 
-    let end_index = (start_index + limit).min(entries.len());
+    let capped_end = start_index.saturating_add(limit);
+    let end_index = capped_end.min(entries.len());
     let mut formatted = Vec::with_capacity(end_index - start_index);
 
     for (position, entry) in entries[start_index..end_index].iter().enumerate() {
@@ -361,6 +362,32 @@ mod tests {
                 "E3: [dir] nested/deeper".to_string(),
                 "E4: [file] nested/deeper/grandchild.txt".to_string(),
                 "E5: [file] root.txt".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn handles_large_limit_without_overflow() {
+        let temp = tempdir().expect("create tempdir");
+        let dir_path = temp.path();
+        tokio::fs::write(dir_path.join("alpha.txt"), b"alpha")
+            .await
+            .expect("write alpha");
+        tokio::fs::write(dir_path.join("beta.txt"), b"beta")
+            .await
+            .expect("write beta");
+        tokio::fs::write(dir_path.join("gamma.txt"), b"gamma")
+            .await
+            .expect("write gamma");
+
+        let entries = list_dir_slice(dir_path, 2, usize::MAX, 1)
+            .await
+            .expect("list without overflow");
+        assert_eq!(
+            entries,
+            vec![
+                "E2: [file] beta.txt".to_string(),
+                "E3: [file] gamma.txt".to_string(),
             ]
         );
     }
