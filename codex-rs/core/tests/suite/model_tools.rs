@@ -15,7 +15,6 @@ use core_test_support::skip_if_no_network;
 use core_test_support::wait_for_event;
 use tempfile::TempDir;
 use wiremock::MockServer;
-use wiremock::matchers::path;
 
 fn sse_completed(id: &str) -> String {
     load_sse_fixture_with_id("tests/fixtures/completed_template.json", id)
