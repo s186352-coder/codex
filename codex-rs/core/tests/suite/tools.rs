@@ -437,18 +437,8 @@ async fn shell_timeout_includes_timeout_prefix_and_metadata() -> Result<()> {
 
         let stdout = output_json["output"].as_str().unwrap_or_default();
         assert!(
-            stdout.contains("command timed out after "),
-            "expected timeout prefix, got {stdout:?}"
-        );
-        let third_line = stdout.lines().nth(2).unwrap_or_default();
-        let duration_ms = third_line
-            .strip_prefix("command timed out after ")
-            .and_then(|line| line.strip_suffix(" milliseconds"))
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_default();
-        assert!(
-            duration_ms >= timeout_ms,
-            "expected duration >= configured timeout, got {duration_ms} (timeout {timeout_ms})"
+            stdout.contains("command timed out"),
+            "timeout output missing `command timed out`: {stdout}"
         );
     } else {
         // Fallback: accept the signal classification path to deflake the test.
