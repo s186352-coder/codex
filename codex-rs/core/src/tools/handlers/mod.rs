@@ -1,5 +1,6 @@
 pub mod apply_patch;
 mod exec_stream;
+mod grep_files;
 mod mcp;
 mod plan;
 mod read_file;
@@ -12,6 +13,7 @@ pub use plan::PLAN_TOOL;
 
 pub use apply_patch::ApplyPatchHandler;
 pub use exec_stream::ExecStreamHandler;
+pub use grep_files::GrepFilesHandler;
 pub use mcp::McpHandler;
 pub use plan::PlanHandler;
 pub use read_file::ReadFileHandler;
