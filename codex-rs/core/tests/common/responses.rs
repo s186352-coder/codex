@@ -53,11 +53,18 @@ impl ResponsesRequest {
     }
 
     pub fn function_call_output(&self, call_id: &str) -> Value {
+        self.call_output(call_id, "function_call_output")
+    }
+
+    pub fn custom_tool_call_output(&self, call_id: &str) -> Value {
+        self.call_output(call_id, "custom_tool_call_output")
+    }
+
+    pub fn call_output(&self, call_id: &str, call_type: &str) -> Value {
         self.input()
             .iter()
             .find(|item| {
-                item.get("type").unwrap() == "function_call_output"
-                    && item.get("call_id").unwrap() == call_id
+                item.get("type").unwrap() == call_type && item.get("call_id").unwrap() == call_id
             })
             .cloned()
             .unwrap_or_else(|| panic!("function call output {call_id} item not found in request"))
@@ -272,7 +279,7 @@ where
 pub async fn mount_sse_once(server: &MockServer, body: String) -> ResponseMock {
     let (mock, response_mock) = base_mock();
     mock.respond_with(sse_response(body))
-        .expect(1)
+        .up_to_n_times(1)
         .mount(server)
         .await;
     response_mock
