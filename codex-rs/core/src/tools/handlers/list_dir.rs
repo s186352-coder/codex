@@ -167,7 +167,7 @@ async fn collect_entries(
                 prefix.join(&file_name)
             };
 
-            let display_name = format_entry_name(&relative_path.to_string_lossy());
+            let display_name = format_entry_name(&relative_path);
             let kind = DirEntryKind::from(&file_type);
             entries.push(DirEntry {
                 name: display_name,
@@ -183,11 +183,12 @@ async fn collect_entries(
     Ok(())
 }
 
-fn format_entry_name(name: &str) -> String {
-    if name.len() > MAX_ENTRY_LENGTH {
-        take_bytes_at_char_boundary(name, MAX_ENTRY_LENGTH).to_string()
+fn format_entry_name(path: &Path) -> String {
+    let normalized = path.to_string_lossy().replace("\\", "/");
+    if normalized.len() > MAX_ENTRY_LENGTH {
+        take_bytes_at_char_boundary(&normalized, MAX_ENTRY_LENGTH).to_string()
     } else {
-        name.to_string()
+        normalized
     }
 }
 
