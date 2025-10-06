@@ -90,6 +90,7 @@ mod tests {
     use super::*;
     use codex_core::config::Config;
     use codex_core::config::ConfigOverrides;
+    use pretty_assertions::assert_eq;
 
     fn test_config() -> Config {
         let overrides = ConfigOverrides {
@@ -207,18 +208,11 @@ mod tests {
             lines.extend(cell.transcript_lines(u16::MAX));
         }
 
-        let mut flat = lines;
-        // Drop leading blank and header line if present.
-        if !flat.is_empty() && lines_to_plain_strings(&[flat[0].clone()])[0].is_empty() {
-            flat.remove(0);
-        }
-        if !flat.is_empty() {
-            let s0 = lines_to_plain_strings(&[flat[0].clone()])[0].clone();
-            if s0 == "codex" {
-                flat.remove(0);
-            }
-        }
-        let streamed = lines_to_plain_strings(&flat);
+        let streamed: Vec<_> = lines_to_plain_strings(&lines)
+            .into_iter()
+            // skip • and 2-space indentation
+            .map(|s| s.chars().skip(2).collect::<String>())
+            .collect();
 
         // Full render of the same source
         let source: String = deltas.iter().copied().collect();

@@ -1879,10 +1879,7 @@ mod tests {
         assert_eq!(rendered_display, vec!["• Detailed reasoning goes here."]);
 
         let rendered_transcript = render_transcript(cell.as_ref());
-        assert_eq!(
-            rendered_transcript,
-            vec!["thinking", "Detailed reasoning goes here."]
-        );
+        assert_eq!(rendered_transcript, vec!["• Detailed reasoning goes here."]);
     }
 
     #[test]
@@ -1894,7 +1891,7 @@ mod tests {
             new_reasoning_summary_block("Detailed reasoning goes here.".to_string(), &config);
 
         let rendered = render_transcript(cell.as_ref());
-        assert_eq!(rendered, vec!["thinking", "Detailed reasoning goes here."]);
+        assert_eq!(rendered, vec!["• Detailed reasoning goes here."]);
     }
 
     #[test]
@@ -1908,10 +1905,7 @@ mod tests {
         );
 
         let rendered = render_transcript(cell.as_ref());
-        assert_eq!(
-            rendered,
-            vec!["thinking", "**High level reasoning without closing"]
-        );
+        assert_eq!(rendered, vec!["• **High level reasoning without closing"]);
     }
 
     #[test]
@@ -1925,10 +1919,7 @@ mod tests {
         );
 
         let rendered = render_transcript(cell.as_ref());
-        assert_eq!(
-            rendered,
-            vec!["thinking", "High level reasoning without closing"]
-        );
+        assert_eq!(rendered, vec!["• High level reasoning without closing"]);
 
         let cell = new_reasoning_summary_block(
             "**High level reasoning without closing**\n\n  ".to_string(),
@@ -1936,10 +1927,7 @@ mod tests {
         );
 
         let rendered = render_transcript(cell.as_ref());
-        assert_eq!(
-            rendered,
-            vec!["thinking", "High level reasoning without closing"]
-        );
+        assert_eq!(rendered, vec!["• High level reasoning without closing"]);
     }
 
     #[test]
@@ -1956,9 +1944,6 @@ mod tests {
         assert_eq!(rendered_display, vec!["• We should fix the bug next."]);
 
         let rendered_transcript = render_transcript(cell.as_ref());
-        assert_eq!(
-            rendered_transcript,
-            vec!["thinking", "We should fix the bug next."]
-        );
+        assert_eq!(rendered_transcript, vec!["• We should fix the bug next."]);
     }
 }
