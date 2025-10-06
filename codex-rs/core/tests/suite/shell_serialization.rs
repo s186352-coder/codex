@@ -24,6 +24,7 @@ use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
+use regex_lite::Regex;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
@@ -224,6 +225,75 @@ freeform shell
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_output_for_freeform_tool_records_duration() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(|config| {
+        config.include_apply_patch_tool = true;
+    });
+    let test = builder.build(&server).await?;
+
+    let call_id = "shell-structured";
+    let args = json!({
+        "command": ["/bin/sh", "-c", "sleep 1s"],
+        "timeout_ms": 2_000,
+    });
+    let responses = vec![
+        sse(vec![
+            json!({"type": "response.created", "response": {"id": "resp-1"}}),
+            ev_function_call(call_id, "shell", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ]),
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    ];
+    mount_sse_sequence(&server, responses).await;
+
+    submit_turn(
+        &test,
+        "run the structured shell command",
+        SandboxPolicy::DangerFullAccess,
+    )
+    .await?;
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("recorded requests present");
+    let bodies = request_bodies(&requests)?;
+    let output_item =
+        find_function_call_output(&bodies, call_id).expect("structured output present");
+    let output = output_item
+        .get("output")
+        .and_then(Value::as_str)
+        .expect("structured output string");
+
+    let expected_pattern = r#"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+$"#;
+    assert_regex_match(expected_pattern, output);
+
+    eprintln!("{output}");
+    let wall_time_regex = Regex::new(r"(?m)^Wall (?:time|Clock): ([0-9]+(?:\.[0-9]+)?) seconds$")
+        .expect("compile wall time regex");
+    let wall_time_seconds = wall_time_regex
+        .captures(output)
+        .and_then(|caps| caps.get(1))
+        .and_then(|value| value.as_str().parse::<f32>().ok())
+        .expect("expected structured shell output to contain wall time seconds");
+    assert!(
+        wall_time_seconds > 0.5,
+        "expected wall time to be greater than zero seconds, got {wall_time_seconds}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_output_reserializes_truncated_content() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -312,15 +382,18 @@ async fn apply_patch_custom_tool_output_is_structured() -> Result<()> {
     let test = builder.build(&server).await?;
 
     let call_id = "apply-patch-structured";
-    let patch = r#"*** Begin Patch
-*** Add File: structured.txt
+    let file_name = "structured.txt";
+    let patch = format!(
+        r#"*** Begin Patch
+*** Add File: {file_name}
 +from custom tool
 *** End Patch
-"#;
+"#
+    );
     let responses = vec![
         sse(vec![
             json!({"type": "response.created", "response": {"id": "resp-1"}}),
-            ev_custom_tool_call(call_id, "apply_patch", patch),
+            ev_custom_tool_call(call_id, "apply_patch", &patch),
             ev_completed("resp-1"),
         ]),
         sse(vec![
@@ -349,30 +422,15 @@ async fn apply_patch_custom_tool_output_is_structured() -> Result<()> {
         .and_then(Value::as_str)
         .expect("apply_patch output string");
 
-    if output.contains("codex-run-as-apply-patch") {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected fallback apply_patch output to be plain text",
-        );
-        // Skip strict success assertions in fallback mode.
-    } else {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected structured apply_patch output to be plain text",
-        );
-        assert!(
-            output.starts_with("Exit code: 0\n"),
-            "expected exit code prefix, got {output:?}",
-        );
-        assert!(
-            output.contains("\nOutput:\n"),
-            "expected Output section, got {output:?}",
-        );
-        assert!(
-            output.contains("Success. Updated the following files:"),
-            "expected success message, got {output:?}",
-        );
-    }
+    let expected_output = format!(
+        r"Exit code: 0
+Wall time: 0 seconds
+Output:
+Success. Updated the following files:
+A {file_name}
+"
+    );
+    assert_eq!(output, expected_output);
 
     Ok(())
 }
@@ -424,34 +482,15 @@ async fn apply_patch_custom_tool_call_creates_file() -> Result<()> {
         .and_then(Value::as_str)
         .expect("apply_patch output string");
 
-    if output.contains("codex-run-as-apply-patch") {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected fallback apply_patch output to be plain text",
-        );
-        // Skip strict success assertions in fallback mode.
-    } else {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected structured apply_patch output to be plain text",
-        );
-        assert!(
-            output.starts_with("Exit code: 0\n"),
-            "expected exit code prefix, got {output:?}",
-        );
-        assert!(
-            output.contains("\nOutput:\n"),
-            "expected Output section, got {output:?}",
-        );
-        assert!(
-            output.contains("Success. Updated the following files:"),
-            "expected success message, got {output:?}",
-        );
-    }
-    assert!(
-        output.contains(&format!("\nA {file_name}\n")),
-        "expected added file listing, got {output:?}",
+    let expected_output = format!(
+        r"Exit code: 0
+Wall time: 0 seconds
+Output:
+Success. Updated the following files:
+A {file_name}
+"
     );
+    assert_eq!(output, expected_output);
 
     let new_file_path = test.cwd.path().join(file_name);
     let created_contents = fs::read_to_string(&new_file_path)?;
@@ -512,37 +551,18 @@ async fn apply_patch_custom_tool_call_updates_existing_file() -> Result<()> {
         .and_then(Value::as_str)
         .expect("apply_patch output string");
 
-    if output.contains("codex-run-as-apply-patch") {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected fallback apply_patch output to be plain text",
-        );
-        // Skip file verification in fallback mode.
-    } else {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected structured apply_patch output to be plain text",
-        );
-        assert!(
-            output.starts_with("Exit code: 0\n"),
-            "expected exit code prefix, got {output:?}",
-        );
-        assert!(
-            output.contains("\nOutput:\n"),
-            "expected Output section, got {output:?}",
-        );
-        assert!(
-            output.contains("Success. Updated the following files:"),
-            "expected success message, got {output:?}",
-        );
-        assert!(
-            output.contains(&format!("\nM {file_name}\n")),
-            "expected modified file listing, got {output:?}",
-        );
+    let expected_output = format!(
+        r"Exit code: 0
+Wall time: 0 seconds
+Output:
+Success. Updated the following files:
+M {file_name}
+"
+    );
+    assert_eq!(output, expected_output);
 
-        let updated_contents = fs::read_to_string(file_path)?;
-        assert_eq!(updated_contents, "after\n", "expected updated file content");
-    }
+    let updated_contents = fs::read_to_string(file_path)?;
+    assert_eq!(updated_contents, "after\n", "expected updated file content");
 
     Ok(())
 }
@@ -649,36 +669,15 @@ async fn apply_patch_function_call_output_is_structured() -> Result<()> {
         .and_then(Value::as_str)
         .expect("apply_patch output string");
 
-    if output.contains("codex-run-as-apply-patch") {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected fallback apply_patch output to be plain text",
-        );
-    } else {
-        assert!(
-            serde_json::from_str::<Value>(output).is_err(),
-            "expected structured apply_patch output to be plain text",
-        );
-        assert!(
-            output.starts_with("Exit code: 0\n"),
-            "expected exit code prefix, got {output:?}",
-        );
-        assert!(
-            output.contains("Success. Updated the following files:"),
-            "expected success message, got {output:?}",
-        );
-        assert!(
-            output.contains(&format!("\nA {file_name}\n")),
-            "expected added file listing, got {output:?}",
-        );
-
-        let new_file_path = test.cwd.path().join(file_name);
-        let created_contents = fs::read_to_string(&new_file_path)?;
-        assert_eq!(
-            created_contents, "via function call\n",
-            "expected file contents for {file_name}"
-        );
-    }
+    let expected_output = format!(
+        r"Exit code: 0
+Wall time: 0 seconds
+Output:
+Success. Updated the following files:
+A {file_name}
+"
+    );
+    assert_eq!(output, expected_output);
 
     Ok(())
 }
@@ -732,6 +731,11 @@ async fn shell_output_is_structured_for_nonzero_exit() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell output string");
 
+    let expected_output = r"Exit code: 42
+Wall time: 0 seconds
+Output:
+";
+    assert_eq!(output, expected_output);
     assert!(
         serde_json::from_str::<Value>(output).is_err(),
         "expected structured shell output to be plain text",
