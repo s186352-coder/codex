@@ -10,7 +10,7 @@ use wiremock::MockServer;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
-use wiremock::matchers::path;
+use wiremock::matchers::path_regex;
 
 #[derive(Debug, Clone)]
 pub struct ResponseMock {
@@ -30,6 +30,10 @@ impl ResponseMock {
             panic!("expected 1 request, got {}", requests.len());
         }
         requests.first().unwrap().clone()
+    }
+
+    pub fn requests(&self) -> Vec<ResponsesRequest> {
+        self.requests.lock().unwrap().clone()
     }
 }
 
@@ -57,6 +61,26 @@ impl ResponsesRequest {
             })
             .cloned()
             .unwrap_or_else(|| panic!("function call output {call_id} item not found in request"))
+    }
+
+    pub fn header(&self, name: &str) -> Option<String> {
+        self.0
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    }
+
+    pub fn path(&self) -> String {
+        self.0.url.path().to_string()
+    }
+
+    pub fn query_param(&self, name: &str) -> Option<String> {
+        self.0
+            .url
+            .query_pairs()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.to_string())
     }
 }
 
@@ -227,7 +251,7 @@ pub fn sse_response(body: String) -> ResponseTemplate {
 fn base_mock() -> (MockBuilder, ResponseMock) {
     let response_mock = ResponseMock::new();
     let mock = Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path_regex(".*/responses$"))
         .and(response_mock.clone());
     (mock, response_mock)
 }
