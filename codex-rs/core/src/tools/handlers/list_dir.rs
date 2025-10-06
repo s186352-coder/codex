@@ -127,8 +127,9 @@ async fn list_dir_slice(
         ));
     }
 
-    let capped_end = start_index.saturating_add(limit);
-    let end_index = capped_end.min(entries.len());
+    let remaining_entries = entries.len() - start_index;
+    let capped_limit = limit.min(remaining_entries);
+    let end_index = start_index + capped_limit;
     let mut formatted = Vec::with_capacity(end_index - start_index);
 
     for (position, entry) in entries[start_index..end_index].iter().enumerate() {
