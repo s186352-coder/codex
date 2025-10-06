@@ -192,8 +192,12 @@ impl HistoryCell for ReasoningSummaryCell {
         }
     }
 
-    fn desired_height(&self, _width: u16) -> u16 {
-        0
+    fn desired_height(&self, width: u16) -> u16 {
+        if self.transcript_only {
+            0
+        } else {
+            self.lines(width).len() as u16
+        }
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
