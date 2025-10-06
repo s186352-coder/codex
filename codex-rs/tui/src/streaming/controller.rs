@@ -196,7 +196,7 @@ mod tests {
         for d in deltas.iter() {
             ctrl.push(d);
             while let (Some(cell), idle) = ctrl.on_commit_tick() {
-                lines.extend(cell.transcript_lines());
+                lines.extend(cell.transcript_lines(u16::MAX));
                 if idle {
                     break;
                 }
@@ -204,7 +204,7 @@ mod tests {
         }
         // Finalize and flush remaining lines now.
         if let Some(cell) = ctrl.finalize() {
-            lines.extend(cell.transcript_lines());
+            lines.extend(cell.transcript_lines(u16::MAX));
         }
 
         let mut flat = lines;

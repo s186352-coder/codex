@@ -4,6 +4,7 @@ pub mod highlight;
 pub mod line_utils;
 pub mod renderable;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Insets {
     pub left: u16,
     pub top: u16,

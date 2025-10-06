@@ -37,7 +37,6 @@ use crate::bottom_pane::prompt_args::prompt_command_with_arg_placeholders;
 use crate::bottom_pane::prompt_args::prompt_has_numeric_placeholders;
 use crate::slash_command::SlashCommand;
 use crate::style::user_message_style;
-use crate::terminal_palette;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
@@ -1515,7 +1514,7 @@ impl WidgetRef for ChatComposer {
                 }
             }
         }
-        let style = user_message_style(terminal_palette::default_bg());
+        let style = user_message_style();
         let mut block_rect = composer_rect;
         block_rect.y = composer_rect.y.saturating_sub(1);
         block_rect.height = composer_rect.height.saturating_add(1);
