@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs::FileType;
 use std::path::Path;
 use std::path::PathBuf;
@@ -17,13 +18,14 @@ use crate::tools::registry::ToolKind;
 pub struct ListDirHandler;
 
 const MAX_ENTRY_LENGTH: usize = 500;
+const INDENTATION_SPACES: usize = 2;
 
 fn default_offset() -> usize {
     1
 }
 
 fn default_limit() -> usize {
-    2000
+    25
 }
 
 fn default_depth() -> usize {
@@ -98,8 +100,11 @@ impl ToolHandler for ListDirHandler {
         }
 
         let entries = list_dir_slice(&path, offset, limit, depth).await?;
+        let mut output = Vec::with_capacity(entries.len() + 1);
+        output.push(format!("Absolute path: {}", path.display()));
+        output.extend(entries);
         Ok(ToolOutput::Function {
-            content: entries.join("\n"),
+            content: output.join("\n"),
             success: Some(true),
         })
     }
@@ -132,9 +137,12 @@ async fn list_dir_slice(
     let end_index = start_index + capped_limit;
     let mut formatted = Vec::with_capacity(end_index - start_index);
 
-    for (position, entry) in entries[start_index..end_index].iter().enumerate() {
-        let ordinal = start_index + position + 1;
-        formatted.push(format!("E{ordinal}: {} {}", entry.kind.label(), entry.name));
+    for entry in &entries[start_index..end_index] {
+        formatted.push(format_entry_line(entry));
+    }
+
+    if end_index < entries.len() {
+        formatted.push(format!("More than {capped_limit} entries found"));
     }
 
     Ok(formatted)
@@ -167,10 +175,14 @@ async fn collect_entries(
                 prefix.join(&file_name)
             };
 
-            let display_name = format_entry_name(&relative_path);
+            let display_name = format_entry_component(&file_name);
+            let display_depth = prefix.components().count();
+            let sort_key = format_entry_name(&relative_path);
             let kind = DirEntryKind::from(&file_type);
             entries.push(DirEntry {
-                name: display_name,
+                name: sort_key,
+                display_name,
+                depth: display_depth,
                 kind,
             });
 
@@ -192,9 +204,32 @@ fn format_entry_name(path: &Path) -> String {
     }
 }
 
+fn format_entry_component(name: &OsStr) -> String {
+    let normalized = name.to_string_lossy();
+    if normalized.len() > MAX_ENTRY_LENGTH {
+        take_bytes_at_char_boundary(&normalized, MAX_ENTRY_LENGTH).to_string()
+    } else {
+        normalized.to_string()
+    }
+}
+
+fn format_entry_line(entry: &DirEntry) -> String {
+    let indent = " ".repeat(entry.depth * INDENTATION_SPACES);
+    let mut name = entry.display_name.clone();
+    match entry.kind {
+        DirEntryKind::Directory => name.push('/'),
+        DirEntryKind::Symlink => name.push('@'),
+        DirEntryKind::Other => name.push('?'),
+        DirEntryKind::File => {}
+    }
+    format!("{indent}{name}")
+}
+
 #[derive(Clone)]
 struct DirEntry {
     name: String,
+    display_name: String,
+    depth: usize,
     kind: DirEntryKind,
 }
 
@@ -204,17 +239,6 @@ enum DirEntryKind {
     File,
     Symlink,
     Other,
-}
-
-impl DirEntryKind {
-    fn label(self) -> &'static str {
-        match self {
-            DirEntryKind::Directory => "[dir]",
-            DirEntryKind::File => "[file]",
-            DirEntryKind::Symlink => "[symlink]",
-            DirEntryKind::Other => "[other]",
-        }
-    }
 }
 
 impl From<&FileType> for DirEntryKind {
@@ -274,21 +298,21 @@ mod tests {
 
         #[cfg(unix)]
         let expected = vec![
-            "E1: [file] entry.txt".to_string(),
-            "E2: [symlink] link".to_string(),
-            "E3: [dir] nested".to_string(),
-            "E4: [file] nested/child.txt".to_string(),
-            "E5: [dir] nested/deeper".to_string(),
-            "E6: [file] nested/deeper/grandchild.txt".to_string(),
+            "entry.txt".to_string(),
+            "link@".to_string(),
+            "nested/".to_string(),
+            "  child.txt".to_string(),
+            "  deeper/".to_string(),
+            "    grandchild.txt".to_string(),
         ];
 
         #[cfg(not(unix))]
         let expected = vec![
-            "E1: [file] entry.txt".to_string(),
-            "E2: [dir] nested".to_string(),
-            "E3: [file] nested/child.txt".to_string(),
-            "E4: [dir] nested/deeper".to_string(),
-            "E5: [file] nested/deeper/grandchild.txt".to_string(),
+            "entry.txt".to_string(),
+            "nested/".to_string(),
+            "  child.txt".to_string(),
+            "  deeper/".to_string(),
+            "    grandchild.txt".to_string(),
         ];
 
         assert_eq!(entries, expected);
@@ -334,10 +358,7 @@ mod tests {
             .expect("list depth 1");
         assert_eq!(
             entries_depth_one,
-            vec![
-                "E1: [dir] nested".to_string(),
-                "E2: [file] root.txt".to_string(),
-            ]
+            vec!["nested/".to_string(), "root.txt".to_string(),]
         );
 
         let entries_depth_two = list_dir_slice(dir_path, 1, 20, 2)
@@ -346,10 +367,10 @@ mod tests {
         assert_eq!(
             entries_depth_two,
             vec![
-                "E1: [dir] nested".to_string(),
-                "E2: [file] nested/child.txt".to_string(),
-                "E3: [dir] nested/deeper".to_string(),
-                "E4: [file] root.txt".to_string(),
+                "nested/".to_string(),
+                "  child.txt".to_string(),
+                "  deeper/".to_string(),
+                "root.txt".to_string(),
             ]
         );
 
@@ -359,11 +380,11 @@ mod tests {
         assert_eq!(
             entries_depth_three,
             vec![
-                "E1: [dir] nested".to_string(),
-                "E2: [file] nested/child.txt".to_string(),
-                "E3: [dir] nested/deeper".to_string(),
-                "E4: [file] nested/deeper/grandchild.txt".to_string(),
-                "E5: [file] root.txt".to_string(),
+                "nested/".to_string(),
+                "  child.txt".to_string(),
+                "  deeper/".to_string(),
+                "    grandchild.txt".to_string(),
+                "root.txt".to_string(),
             ]
         );
     }
@@ -387,10 +408,29 @@ mod tests {
             .expect("list without overflow");
         assert_eq!(
             entries,
-            vec![
-                "E2: [file] beta.txt".to_string(),
-                "E3: [file] gamma.txt".to_string(),
-            ]
+            vec!["beta.txt".to_string(), "gamma.txt".to_string(),]
+        );
+    }
+
+    #[tokio::test]
+    async fn indicates_truncated_results() {
+        let temp = tempdir().expect("create tempdir");
+        let dir_path = temp.path();
+
+        for idx in 0..40 {
+            let file = dir_path.join(format!("file_{idx:02}.txt"));
+            tokio::fs::write(file, b"content")
+                .await
+                .expect("write file");
+        }
+
+        let entries = list_dir_slice(dir_path, 1, 25, 1)
+            .await
+            .expect("list directory");
+        assert_eq!(entries.len(), 26);
+        assert_eq!(
+            entries.last(),
+            Some(&"More than 25 entries found".to_string())
         );
     }
 }
