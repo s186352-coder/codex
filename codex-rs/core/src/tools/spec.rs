@@ -379,6 +379,14 @@ fn create_list_dir_tool() -> ToolSpec {
             description: Some("The maximum number of entries to return.".to_string()),
         },
     );
+    properties.insert(
+        "depth".to_string(),
+        JsonSchema::Number {
+            description: Some(
+                "The maximum directory depth to traverse. Must be 1 or greater.".to_string(),
+            ),
+        },
+    );
 
     ToolSpec::Function(ResponsesApiTool {
         name: "list_dir".to_string(),
