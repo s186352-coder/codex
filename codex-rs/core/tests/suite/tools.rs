@@ -26,7 +26,6 @@ use core_test_support::wait_for_event;
 use regex_lite::Regex;
 use serde_json::Value;
 use serde_json::json;
-//
 
 async fn submit_turn(
     test: &TestCodex,
@@ -58,8 +57,6 @@ async fn submit_turn(
 
     Ok(())
 }
-
-//
 
 fn tool_names(body: &Value) -> Vec<String> {
     body.get("tools")
