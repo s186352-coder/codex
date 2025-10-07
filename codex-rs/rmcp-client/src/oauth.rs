@@ -206,11 +206,11 @@ pub fn save_oauth_tokens(
     let keyring_store = KeyringCredentialStore;
     match store {
         OAuthCredentialsStoreMode::Auto => {
-            save_oauth_tokens_with_store(&keyring_store, server_name, tokens, true)
+            save_oauth_tokens_with_store_with_fallback_to_file(&keyring_store, server_name, tokens)
         }
         OAuthCredentialsStoreMode::File => save_oauth_tokens_to_file(tokens),
         OAuthCredentialsStoreMode::Keyring => {
-            save_oauth_tokens_with_store(&keyring_store, server_name, tokens, false)
+            save_oauth_tokens_with_store(&keyring_store, server_name, tokens)
         }
     }
 }
@@ -219,7 +219,6 @@ fn save_oauth_tokens_with_store<C: CredentialStore>(
     store: &C,
     server_name: &str,
     tokens: &StoredOAuthTokens,
-    fallback_to_file: bool,
 ) -> Result<()> {
     let serialized = serde_json::to_string(tokens).context("failed to serialize OAuth tokens")?;
 
@@ -232,17 +231,28 @@ fn save_oauth_tokens_with_store<C: CredentialStore>(
             Ok(())
         }
         Err(error) => {
-            let message = error.message();
-            warn!("failed to write OAuth tokens to keyring: {message}");
-            if fallback_to_file {
-                save_oauth_tokens_to_file(tokens)
-                    .with_context(|| format!("failed to write OAuth tokens to keyring: {message}"))
-            } else {
-                let err = error.into_error();
-                Err(err.context(format!(
-                    "failed to write OAuth tokens to keyring: {message}"
-                )))
-            }
+            let message = format!(
+                "failed to write OAuth tokens to keyring: {}",
+                error.message()
+            );
+            warn!("{message}");
+            Err(error.into_error().context(message))
+        }
+    }
+}
+
+fn save_oauth_tokens_with_store_with_fallback_to_file<C: CredentialStore>(
+    store: &C,
+    server_name: &str,
+    tokens: &StoredOAuthTokens,
+) -> Result<()> {
+    match save_oauth_tokens_with_store(store, server_name, tokens) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let message = error.to_string();
+            warn!("falling back to file storage for OAuth tokens: {message}");
+            save_oauth_tokens_to_file(tokens)
+                .with_context(|| format!("failed to write OAuth tokens to keyring: {message}"))
         }
     }
 }
@@ -782,7 +792,11 @@ mod tests {
 
         super::save_oauth_tokens_to_file(&tokens)?;
 
-        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens, true)?;
+        super::save_oauth_tokens_with_store_with_fallback_to_file(
+            &store,
+            &tokens.server_name,
+            &tokens,
+        )?;
 
         let fallback_path = super::fallback_file_path()?;
         assert!(!fallback_path.exists(), "fallback file should be removed");
@@ -799,7 +813,11 @@ mod tests {
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
         store.set_error(&key, KeyringError::Invalid("error".into(), "save".into()));
 
-        super::save_oauth_tokens_with_store(&store, &tokens.server_name, &tokens, true)?;
+        super::save_oauth_tokens_with_store_with_fallback_to_file(
+            &store,
+            &tokens.server_name,
+            &tokens,
+        )?;
 
         let fallback_path = super::fallback_file_path()?;
         assert!(fallback_path.exists(), "fallback file should be created");
