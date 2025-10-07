@@ -262,32 +262,33 @@ fn save_oauth_tokens_with_store_with_fallback_to_file<C: CredentialStore>(
 pub fn delete_oauth_tokens(
     server_name: &str,
     url: &str,
-    store: OAuthCredentialsStoreMode,
+    store_mode: OAuthCredentialsStoreMode,
 ) -> Result<bool> {
-    match store {
-        OAuthCredentialsStoreMode::Auto | OAuthCredentialsStoreMode::Keyring => {
-            let keyring_store = KeyringCredentialStore;
-            delete_oauth_tokens_with_store(&keyring_store, server_name, url)
-        }
-        OAuthCredentialsStoreMode::File => {
-            let key = compute_store_key(server_name, url)?;
-            delete_oauth_tokens_from_file(&key)
-        }
-    }
+    let keyring_store = KeyringCredentialStore;
+    delete_oauth_tokens_with_store_mode(&keyring_store, store_mode, server_name, url)
 }
 
-fn delete_oauth_tokens_with_store<C: CredentialStore>(
-    store: &C,
+fn delete_oauth_tokens_with_store_mode<C: CredentialStore>(
+    keyring_store: &C,
+    store_mode: OAuthCredentialsStoreMode,
     server_name: &str,
     url: &str,
 ) -> Result<bool> {
     let key = compute_store_key(server_name, url)?;
-    let keyring_removed = match store.delete(KEYRING_SERVICE, &key) {
+    let keyring_result = keyring_store.delete(KEYRING_SERVICE, &key);
+    let keyring_removed = match keyring_result {
         Ok(removed) => removed,
         Err(error) => {
             let message = error.message();
             warn!("failed to delete OAuth tokens from keyring: {message}");
-            return Err(error.into_error()).context("failed to delete OAuth tokens from keyring");
+            if matches!(
+                store_mode,
+                OAuthCredentialsStoreMode::Auto | OAuthCredentialsStoreMode::Keyring
+            ) {
+                return Err(error.into_error())
+                    .context("failed to delete OAuth tokens from keyring");
+            }
+            false
         }
     };
 
@@ -847,8 +848,34 @@ mod tests {
         store.save(KEYRING_SERVICE, &key, &serialized)?;
         super::save_oauth_tokens_to_file(&tokens)?;
 
-        let removed =
-            super::delete_oauth_tokens_with_store(&store, &tokens.server_name, &tokens.url)?;
+        let removed = super::delete_oauth_tokens_with_store_mode(
+            &store,
+            OAuthCredentialsStoreMode::Auto,
+            &tokens.server_name,
+            &tokens.url,
+        )?;
+        assert!(removed);
+        assert!(!store.contains(&key));
+        assert!(!super::fallback_file_path()?.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn delete_oauth_tokens_file_mode_removes_keyring_only_entry() -> Result<()> {
+        let _env = TempCodexHome::new();
+        let store = MockCredentialStore::default();
+        let tokens = sample_tokens();
+        let serialized = serde_json::to_string(&tokens)?;
+        let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
+        store.save(KEYRING_SERVICE, &key, &serialized)?;
+        assert!(store.contains(&key));
+
+        let removed = super::delete_oauth_tokens_with_store_mode(
+            &store,
+            OAuthCredentialsStoreMode::Auto,
+            &tokens.server_name,
+            &tokens.url,
+        )?;
         assert!(removed);
         assert!(!store.contains(&key));
         assert!(!super::fallback_file_path()?.exists());
@@ -864,8 +891,12 @@ mod tests {
         store.set_error(&key, KeyringError::Invalid("error".into(), "delete".into()));
         super::save_oauth_tokens_to_file(&tokens).unwrap();
 
-        let result =
-            super::delete_oauth_tokens_with_store(&store, &tokens.server_name, &tokens.url);
+        let result = super::delete_oauth_tokens_with_store_mode(
+            &store,
+            OAuthCredentialsStoreMode::Auto,
+            &tokens.server_name,
+            &tokens.url,
+        );
         assert!(result.is_err());
         assert!(super::fallback_file_path().unwrap().exists());
         Ok(())
