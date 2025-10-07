@@ -63,8 +63,10 @@ pub struct StoredOAuthTokens {
 #[serde(rename_all = "lowercase")]
 pub enum OAuthCredentialsStoreMode {
     /// Keyring when available, otherwise file.
+    /// Credentials stored in the keyring will only be readable by Codex unless the user explicitly grants access via OS-level keyring access.
     Auto,
-    /// File in the Codex home directory.
+    /// CODEX_HOME/.credentials.json
+    /// This file will be readable to Codex and other applications running as the same user.
     File,
     /// Keyring when available, otherwise fail.
     Keyring,
