@@ -30,7 +30,7 @@ impl Drop for CallbackServerGuard {
 pub async fn perform_oauth_login(
     server_name: &str,
     server_url: &str,
-    store: OAuthCredentialsStoreMode,
+    store_mode: OAuthCredentialsStoreMode,
 ) -> Result<()> {
     let server = Arc::new(Server::http("127.0.0.1:0").map_err(|err| anyhow!(err))?);
     let guard = CallbackServerGuard {
@@ -86,7 +86,7 @@ pub async fn perform_oauth_login(
         client_id,
         token_response: WrappedOAuthTokenResponse(credentials),
     };
-    save_oauth_tokens(server_name, &stored, store)?;
+    save_oauth_tokens(server_name, &stored, store_mode)?;
 
     drop(guard);
     Ok(())

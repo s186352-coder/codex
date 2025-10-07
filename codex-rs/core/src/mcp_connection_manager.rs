@@ -126,16 +126,11 @@ impl McpClientAdapter {
         bearer_token: Option<String>,
         params: mcp_types::InitializeRequestParams,
         startup_timeout: Duration,
-        credentials_store: OAuthCredentialsStoreMode,
+        store_mode: OAuthCredentialsStoreMode,
     ) -> Result<Self> {
         let client = Arc::new(
-            RmcpClient::new_streamable_http_client(
-                &server_name,
-                &url,
-                bearer_token,
-                credentials_store,
-            )
-            .await?,
+            RmcpClient::new_streamable_http_client(&server_name, &url, bearer_token, store_mode)
+                .await?,
         );
         client.initialize(params, Some(startup_timeout)).await?;
         Ok(McpClientAdapter::Rmcp(client))
@@ -190,7 +185,7 @@ impl McpConnectionManager {
     pub async fn new(
         mcp_servers: HashMap<String, McpServerConfig>,
         use_rmcp_client: bool,
-        credentials_store: OAuthCredentialsStoreMode,
+        store_mode: OAuthCredentialsStoreMode,
     ) -> Result<(Self, ClientStartErrors)> {
         // Early exit if no servers are configured.
         if mcp_servers.is_empty() {
@@ -258,7 +253,7 @@ impl McpConnectionManager {
                             bearer_token,
                             params,
                             startup_timeout,
-                            credentials_store,
+                            store_mode,
                         )
                         .await
                     }

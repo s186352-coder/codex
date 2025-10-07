@@ -120,11 +120,11 @@ impl RmcpClient {
         server_name: &str,
         url: &str,
         bearer_token: Option<String>,
-        credentials_store: OAuthCredentialsStoreMode,
+        store_mode: OAuthCredentialsStoreMode,
     ) -> Result<Self> {
         let initial_oauth_tokens = match bearer_token {
             Some(_) => None,
-            None => match load_oauth_tokens(server_name, url, credentials_store) {
+            None => match load_oauth_tokens(server_name, url, store_mode) {
                 Ok(tokens) => tokens,
                 Err(err) => {
                     warn!("failed to read tokens for server `{server_name}`: {err}");
@@ -133,13 +133,9 @@ impl RmcpClient {
             },
         };
         let transport = if let Some(initial_tokens) = initial_oauth_tokens.clone() {
-            let (transport, oauth_persistor) = create_oauth_transport_and_runtime(
-                server_name,
-                url,
-                initial_tokens,
-                credentials_store,
-            )
-            .await?;
+            let (transport, oauth_persistor) =
+                create_oauth_transport_and_runtime(server_name, url, initial_tokens, store_mode)
+                    .await?;
             PendingTransport::StreamableHttpWithOAuth {
                 transport,
                 oauth_persistor,
