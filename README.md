@@ -93,6 +93,7 @@ See the [Execpolicy quickstart](./docs/execpolicy.md) to set up rules that gover
   - [GitHub Action](https://github.com/openai/codex-action)
   - [TypeScript SDK](./sdk/typescript/README.md)
   - [Non-interactive mode (`codex exec`)](./docs/exec.md)
+- [**Image generation quickstart**](./docs/image-generation.md)
 - [**Advanced**](./docs/advanced.md)
   - [Tracing / verbose logging](./docs/advanced.md#tracing--verbose-logging)
   - [Model Context Protocol (MCP)](./docs/advanced.md#model-context-protocol-mcp)
