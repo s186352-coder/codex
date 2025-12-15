@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::IntoEnumIterator;
 use strum_macros::Display;
 use strum_macros::EnumIter;
 use ts_rs::TS;
+
+use crate::config_types::Verbosity;
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
 #[derive(
@@ -36,7 +39,7 @@ pub enum ReasoningEffort {
 }
 
 /// A reasoning effort option that can be surfaced for a model.
-#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
 pub struct ReasoningEffortPreset {
     /// Effort level that the model supports.
     pub effort: ReasoningEffort,
@@ -111,6 +114,51 @@ pub enum ConfigShellToolType {
     ShellCommand,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyPatchToolType {
+    Freeform,
+    Function,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash, TS, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningSummaryFormat {
+    #[default]
+    None,
+    Experimental,
+}
+
+/// Server-provided truncation policy metadata for a model.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncationMode {
+    Bytes,
+    Tokens,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS, JsonSchema)]
+pub struct TruncationPolicyConfig {
+    pub mode: TruncationMode,
+    pub limit: i64,
+}
+
+impl TruncationPolicyConfig {
+    pub const fn bytes(limit: i64) -> Self {
+        Self {
+            mode: TruncationMode::Bytes,
+            limit,
+        }
+    }
+
+    pub const fn tokens(limit: i64) -> Self {
+        Self {
+            mode: TruncationMode::Tokens,
+            limit,
+        }
+    }
+}
+
 /// Semantic version triple encoded as an array in JSON (e.g. [0, 62, 0]).
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS, JsonSchema)]
 pub struct ClientVersion(pub i32, pub i32, pub i32);
@@ -120,28 +168,33 @@ pub struct ClientVersion(pub i32, pub i32, pub i32);
 pub struct ModelInfo {
     pub slug: String,
     pub display_name: String,
-    #[serde(default)]
     pub description: Option<String>,
     pub default_reasoning_level: ReasoningEffort,
-    pub supported_reasoning_levels: Vec<ReasoningEffort>,
+    pub supported_reasoning_levels: Vec<ReasoningEffortPreset>,
     pub shell_type: ConfigShellToolType,
-    #[serde(default = "default_visibility")]
     pub visibility: ModelVisibility,
     pub minimal_client_version: ClientVersion,
-    #[serde(default)]
     pub supported_in_api: bool,
-    #[serde(default)]
     pub priority: i32,
+    pub upgrade: Option<String>,
+    pub base_instructions: Option<String>,
+    pub supports_reasoning_summaries: bool,
+    pub support_verbosity: bool,
+    pub default_verbosity: Option<Verbosity>,
+    pub apply_patch_tool_type: Option<ApplyPatchToolType>,
+    pub truncation_policy: TruncationPolicyConfig,
+    pub supports_parallel_tool_calls: bool,
+    pub context_window: Option<i64>,
+    pub reasoning_summary_format: ReasoningSummaryFormat,
+    pub experimental_supported_tools: Vec<String>,
 }
 
 /// Response wrapper for `/models`.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema, Default)]
 pub struct ModelsResponse {
     pub models: Vec<ModelInfo>,
-}
-
-fn default_visibility() -> ModelVisibility {
-    ModelVisibility::None
+    #[serde(default)]
+    pub etag: String,
 }
 
 // convert ModelInfo to ModelPreset
@@ -149,22 +202,57 @@ impl From<ModelInfo> for ModelPreset {
     fn from(info: ModelInfo) -> Self {
         ModelPreset {
             id: info.slug.clone(),
-            model: info.slug,
+            model: info.slug.clone(),
             display_name: info.display_name,
             description: info.description.unwrap_or_default(),
             default_reasoning_effort: info.default_reasoning_level,
-            supported_reasoning_efforts: info
-                .supported_reasoning_levels
-                .into_iter()
-                .map(|level| ReasoningEffortPreset {
-                    effort: level,
-                    // todo: add description for each reasoning effort
-                    description: level.to_string(),
-                })
-                .collect(),
+            supported_reasoning_efforts: info.supported_reasoning_levels.clone(),
             is_default: false, // default is the highest priority available model
-            upgrade: None,     // no upgrade available (todo: think about it)
+            upgrade: info.upgrade.as_ref().map(|upgrade_slug| ModelUpgrade {
+                id: upgrade_slug.clone(),
+                reasoning_effort_mapping: reasoning_effort_mapping_from_presets(
+                    &info.supported_reasoning_levels,
+                ),
+                migration_config_key: info.slug.clone(),
+            }),
             show_in_picker: info.visibility == ModelVisibility::List,
         }
     }
+}
+
+fn reasoning_effort_mapping_from_presets(
+    presets: &[ReasoningEffortPreset],
+) -> Option<HashMap<ReasoningEffort, ReasoningEffort>> {
+    if presets.is_empty() {
+        return None;
+    }
+
+    // Map every canonical effort to the closest supported effort for the new model.
+    let supported: Vec<ReasoningEffort> = presets.iter().map(|p| p.effort).collect();
+    let mut map = HashMap::new();
+    for effort in ReasoningEffort::iter() {
+        let nearest = nearest_effort(effort, &supported);
+        map.insert(effort, nearest);
+    }
+    Some(map)
+}
+
+fn effort_rank(effort: ReasoningEffort) -> i32 {
+    match effort {
+        ReasoningEffort::None => 0,
+        ReasoningEffort::Minimal => 1,
+        ReasoningEffort::Low => 2,
+        ReasoningEffort::Medium => 3,
+        ReasoningEffort::High => 4,
+        ReasoningEffort::XHigh => 5,
+    }
+}
+
+fn nearest_effort(target: ReasoningEffort, supported: &[ReasoningEffort]) -> ReasoningEffort {
+    let target_rank = effort_rank(target);
+    supported
+        .iter()
+        .copied()
+        .min_by_key(|candidate| (effort_rank(*candidate) - target_rank).abs())
+        .unwrap_or(target)
 }

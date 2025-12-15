@@ -7,7 +7,11 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
+#[cfg(windows)]
+mod win;
+
 use anyhow::Result;
+#[cfg(not(windows))]
 use portable_pty::native_pty_system;
 use portable_pty::CommandBuilder;
 use portable_pty::MasterPty;
@@ -50,6 +54,7 @@ impl ExecCommandSession {
     pub fn new(
         writer_tx: mpsc::Sender<Vec<u8>>,
         output_tx: broadcast::Sender<Vec<u8>>,
+        initial_output_rx: broadcast::Receiver<Vec<u8>>,
         killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
         reader_handle: JoinHandle<()>,
         writer_handle: JoinHandle<()>,
@@ -58,7 +63,6 @@ impl ExecCommandSession {
         exit_code: Arc<StdMutex<Option<i32>>>,
         pair: PtyPairWrapper,
     ) -> (Self, broadcast::Receiver<Vec<u8>>) {
-        let initial_output_rx = output_tx.subscribe();
         (
             Self {
                 writer_tx,
@@ -90,10 +94,8 @@ impl ExecCommandSession {
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code.lock().ok().and_then(|guard| *guard)
     }
-}
 
-impl Drop for ExecCommandSession {
-    fn drop(&mut self) {
+    pub fn terminate(&self) {
         if let Ok(mut killer_opt) = self.killer.lock() {
             if let Some(mut killer) = killer_opt.take() {
                 let _ = killer.kill();
@@ -118,11 +120,27 @@ impl Drop for ExecCommandSession {
     }
 }
 
+impl Drop for ExecCommandSession {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
 #[derive(Debug)]
 pub struct SpawnedPty {
     pub session: ExecCommandSession,
     pub output_rx: broadcast::Receiver<Vec<u8>>,
     pub exit_rx: oneshot::Receiver<i32>,
+}
+
+#[cfg(windows)]
+fn platform_native_pty_system() -> Box<dyn portable_pty::PtySystem + Send> {
+    Box::new(win::ConPtySystem::default())
+}
+
+#[cfg(not(windows))]
+fn platform_native_pty_system() -> Box<dyn portable_pty::PtySystem + Send> {
+    native_pty_system()
 }
 
 pub async fn spawn_pty_process(
@@ -136,7 +154,7 @@ pub async fn spawn_pty_process(
         anyhow::bail!("missing program for PTY spawn");
     }
 
-    let pty_system = native_pty_system();
+    let pty_system = platform_native_pty_system();
     let pair = pty_system.openpty(PtySize {
         rows: 24,
         cols: 80,
@@ -159,6 +177,8 @@ pub async fn spawn_pty_process(
 
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
     let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
+    // Subscribe before starting the reader thread.
+    let initial_output_rx = output_tx.subscribe();
 
     let mut reader = pair.master.try_clone_reader()?;
     let output_tx_clone = output_tx.clone();
@@ -224,6 +244,7 @@ pub async fn spawn_pty_process(
     let (session, output_rx) = ExecCommandSession::new(
         writer_tx,
         output_tx,
+        initial_output_rx,
         killer,
         reader_handle,
         writer_handle,
