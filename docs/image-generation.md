@@ -41,6 +41,7 @@ response = client.images.generate(
     model="gpt-image-1",
     prompt="a scenic lake at sunrise with soft mist",
     size="1024x1024",
+    response_format="b64_json",
 )
 
 image_b64 = response.data[0].b64_json
